@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -8,7 +9,9 @@ import (
 	"time"
 
 	"github.com/ifaisalabid1/url-shortener/internal/config"
+	"github.com/ifaisalabid1/url-shortener/internal/repository"
 	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -32,6 +35,17 @@ func main() {
 	}
 
 	defer db.Close()
+
+	redisClient, err := connectRedis(cfg)
+	if err != nil {
+		logger.Error("failed to connect to redis", "error", err)
+		os.Exit(1)
+	}
+
+	defer redisClient.Close()
+
+	urlRepo := repository.NewURLRepository(db)
+	cacheRepo := repository.NewClientRepository(redisClient)
 }
 
 func connectDB(cfg *config.Config) (*sql.DB, error) {
@@ -60,4 +74,19 @@ func connectDB(cfg *config.Config) (*sql.DB, error) {
 
 	return db, nil
 
+}
+
+func connectRedis(cfg *config.Config) (*redis.Client, error) {
+	client := redis.NewClient(&redis.Options{
+		Addr:     fmt.Sprintf("%s:%s", cfg.Redis.Host, cfg.Redis.Port),
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+		PoolSize: 10,
+	})
+
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		return nil, fmt.Errorf("failed to ping Redis: %w", err)
+	}
+
+	return client, nil
 }
